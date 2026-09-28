@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Учёт СИЗ</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+<header>
+  <h1>Учёт СИЗ</h1>
+  <p class="subtitle">Электронная карточка учёта средств индивидуальной защиты</p>
+</header>
+
+<main>
+
+  <!-- Панель управления: фильтр + кнопка добавления -->
+  <section class="toolbar">
+    <label>
+      Статус:
+      <select id="statusFilter">
+        <option value="">Все</option>
+        <option value="InStock">На хранении</option>
+        <option value="Issued">Выдано</option>
+        <option value="UnderInspection">На проверке</option>
+        <option value="WrittenOff">Списано</option>
+      </select>
+    </label>
+
+    <label class="checkbox-label">
+      <input type="checkbox" id="expiringOnly" />
+      Только с истекающим сроком годности
+    </label>
+
+    <button id="btnRefresh">Обновить</button>
+    <button id="btnAdd" class="primary">+ Добавить карточку</button>
+  </section>
+
+  <p id="errorBox" class="error hidden"></p>
+
+  <!-- Таблица карточек -->
+  <table>
+    <thead>
+      <tr>
+        <th>Наименование</th>
+        <th>Партия</th>
+        <th>Срок годности</th>
+        <th>Место хранения</th>
+        <th>Статус</th>
+        <th>Владелец</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody id="cardsBody">
+      <tr><td colspan="7" class="empty">Загрузка...</td></tr>
+    </tbody>
+  </table>
+
+</main>
+
+<!-- Форма добавления / редактирования карточки.
+     Видимость управляется ТОЛЬКО инлайн-стилем display из JS (не CSS-классом) —
+     так поведение не зависит от порядка правил в style.css. -->
+<div id="formOverlay" class="overlay" style="display: none;">
+  <form id="cardForm" class="card-form">
+    <h2 id="formTitle">Новая карточка СИЗ</h2>
+    <p id="formError" class="error hidden"></p>
+    <input type="hidden" id="cardId" />
+
+    <div class="grid">
+      <label>Наименование*
+        <input type="text" id="f_name" required maxlength="200" />
+      </label>
+      <label>Завод-изготовитель
+        <input type="text" id="f_manufacturer" maxlength="200" />
+      </label>
+      <label>Номер партии
+        <input type="text" id="f_batchNumber" maxlength="50" />
+      </label>
+      <label>Дата изготовления
+        <input type="date" id="f_manufactureDate" />
+      </label>
+      <label>Заводской номер
+        <input type="text" id="f_serialNumber" maxlength="50" />
+      </label>
+      <label>Размер / рост
+        <input type="text" id="f_size" maxlength="20" />
+      </label>
+      <label>Место хранения
+        <input type="text" id="f_storageLocation" maxlength="100" />
+      </label>
+      <label>Инвентарный номер
+        <input type="text" id="f_inventoryNumber" maxlength="50" />
+      </label>
+      <label>Статус
+        <select id="f_status">
+          <option value="InStock">На хранении</option>
+          <option value="Issued">Выдано</option>
+          <option value="UnderInspection">На проверке</option>
+          <option value="WrittenOff">Списано</option>
+        </select>
+      </label>
+      <label>Срок годности
+        <input type="date" id="f_expiryDate" />
+      </label>
+      <label>Владелец (ФИО)
+        <input type="text" id="f_owner" maxlength="150" />
+      </label>
+      <label>Дата выдачи
+        <input type="date" id="f_issueDate" />
+      </label>
+    </div>
+
+    <div class="form-actions">
+      <button type="button" id="btnCancel">Отмена</button>
+      <button type="submit" class="primary">Сохранить</button>
+    </div>
+  </form>
+</div>
+
+<script>
+  // Страница лежит в wwwroot того же ASP.NET Core приложения, что и API,
+  // поэтому путь относительный — CORS и явный порт не нужны.
+  const API_BASE = "/api/sizcards";
+
+  const statusLabels = {
+    InStock: "На хранении",
+    Issued: "Выдано",
+    UnderInspection: "На проверке",
+    WrittenOff: "Списано",
+  };
+
+  const cardsBody = document.getElementById("cardsBody");
+  const errorBox = document.getElementById("errorBox");
+  const statusFilter = document.getElementById("statusFilter");
+  const expiringOnly = document.getElementById("expiringOnly");
+  const overlay = document.getElementById("formOverlay");
+  const form = document.getElementById("cardForm");
+  const formError = document.getElementById("formError");
+
+  function showError(message) {
+    errorBox.textContent = message;
+    errorBox.classList.remove("hidden");
+  }
+
+  function hideError() {
+    errorBox.classList.add("hidden");
+  }
+
+  // Ошибка внутри самой формы (видна поверх модалки, в отличие от errorBox).
+  function showFormError(message) {
+    formError.textContent = message;
+    formError.classList.remove("hidden");
+  }
+
+  function hideFormError() {
+    formError.classList.add("hidden");
+  }
+
+  async function loadCards() {
+    hideError();
+    cardsBody.innerHTML = `<tr><td colspan="7" class="empty">Загрузка...</td></tr>`;
+
+    try {
+      let url = API_BASE;
+      if (expiringOnly.checked) {
+        url += "/expiring-soon";
+      } else if (statusFilter.value) {
+        url += `?status=${statusFilter.value}`;
+      }
+
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(`Сервер ответил ${res.status}`);
+      const cards = await res.json();
+      renderTable(cards);
+    } catch (err) {
+      cardsBody.innerHTML = "";
+      showError(`Не удалось загрузить данные: ${err.message}. Проверь, что API запущен (dotnet run) и адрес в API_BASE верный.`);
+    }
+  }
+
+  function renderTable(cards) {
+    if (!cards.length) {
+      cardsBody.innerHTML = `<tr><td colspan="7" class="empty">Карточек нет</td></tr>`;
+      return;
+    }
+
+    cardsBody.innerHTML = cards.map(c => `
+      <tr class="${c.isExpiringSoon ? "expiring" : ""}">
+        <td>${escapeHtml(c.name)}</td>
+        <td>${escapeHtml(c.batchNumber ?? "")}</td>
+        <td>${c.expiryDate ?? "—"}</td>
+        <td>${escapeHtml(c.storageLocation ?? "")}</td>
+        <td><span class="badge badge-${c.status}">${statusLabels[c.status] ?? c.status}</span></td>
+        <td>${escapeHtml(c.owner ?? "")}</td>
+        <td class="actions">
+          <button data-edit="${c.id}" title="Редактировать">✎</button>
+          <button data-delete="${c.id}" title="Удалить">✕</button>
+        </td>
+      </tr>
+    `).join("");
+  }
+
+  function escapeHtml(str) {
+    const div = document.createElement("div");
+    div.textContent = str;
+    return div.innerHTML;
+  }
+
+  // --- Открытие формы (добавление / редактирование) ---
+
+  function openForm(card) {
+    form.reset();
+    hideFormError();
+    document.getElementById("formTitle").textContent = card ? "Редактирование карточки" : "Новая карточка СИЗ";
+    document.getElementById("cardId").value = card?.id ?? "";
+    document.getElementById("f_name").value = card?.name ?? "";
+    document.getElementById("f_manufacturer").value = card?.manufacturer ?? "";
+    document.getElementById("f_batchNumber").value = card?.batchNumber ?? "";
+    document.getElementById("f_manufactureDate").value = card?.manufactureDate ?? "";
+    document.getElementById("f_serialNumber").value = card?.serialNumber ?? "";
+    document.getElementById("f_size").value = card?.size ?? "";
+    document.getElementById("f_storageLocation").value = card?.storageLocation ?? "";
+    document.getElementById("f_inventoryNumber").value = card?.inventoryNumber ?? "";
+    document.getElementById("f_status").value = card?.status ?? "InStock";
+    document.getElementById("f_expiryDate").value = card?.expiryDate ?? "";
+    document.getElementById("f_owner").value = card?.owner ?? "";
+    document.getElementById("f_issueDate").value = card?.issueDate ?? "";
+    overlay.style.display = "flex";
+  }
+
+  function closeForm() {
+    overlay.style.display = "none";
+  }
+
+  document.getElementById("btnAdd").addEventListener("click", () => openForm(null));
+  document.getElementById("btnCancel").addEventListener("click", closeForm);
+  document.getElementById("btnRefresh").addEventListener("click", loadCards);
+  statusFilter.addEventListener("change", loadCards);
+  expiringOnly.addEventListener("change", loadCards);
+
+  cardsBody.addEventListener("click", async (e) => {
+    const editId = e.target.dataset.edit;
+    const deleteId = e.target.dataset.delete;
+
+    if (editId) {
+      const res = await fetch(`${API_BASE}/${editId}`);
+      if (res.ok) openForm(await res.json());
+    }
+
+    if (deleteId) {
+      if (!confirm("Удалить карточку?")) return;
+      const res = await fetch(`${API_BASE}/${deleteId}`, { method: "DELETE" });
+      if (res.ok) loadCards();
+      else showError(`Не удалось удалить (код ${res.status})`);
+    }
+  });
+
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    hideFormError();
+
+    const id = document.getElementById("cardId").value;
+    const payload = {
+      name: document.getElementById("f_name").value,
+      manufacturer: document.getElementById("f_manufacturer").value || null,
+      batchNumber: document.getElementById("f_batchNumber").value || null,
+      manufactureDate: document.getElementById("f_manufactureDate").value || null,
+      serialNumber: document.getElementById("f_serialNumber").value || null,
+      size: document.getElementById("f_size").value || null,
+      storageLocation: document.getElementById("f_storageLocation").value || null,
+      inventoryNumber: document.getElementById("f_inventoryNumber").value || null,
+      status: document.getElementById("f_status").value,
+      expiryDate: document.getElementById("f_expiryDate").value || null,
+      owner: document.getElementById("f_owner").value || null,
+      issueDate: document.getElementById("f_issueDate").value || null,
+    };
+
+    try {
+      const res = id
+        ? await fetch(`${API_BASE}/${id}`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          })
+        : await fetch(API_BASE, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          });
+
+      if (!res.ok) {
+        // Пытаемся достать текст ошибки от ASP.NET Core (400 обычно приходит
+        // как ValidationProblem с деталями по каждому полю).
+        let detail = "";
+        try {
+          const body = await res.json();
+          detail = body.title ?? JSON.stringify(body.errors ?? body);
+        } catch {
+          detail = await res.text();
+        }
+        throw new Error(`${res.status}${detail ? " — " + detail : ""}`);
+      }
+
+      closeForm();
+      loadCards();
+    } catch (err) {
+      showFormError(`Не удалось сохранить: ${err.message}`);
+    }
+  });
+
+  // Первая загрузка при открытии страницы
+  loadCards();
+</script>
+
+</body>
+</html>

@@ -1,0 +1,88 @@
+# СИЗ — Карточка учёта (ASP.NET Core Web API)
+
+Прототип CRUD для **Пункта №2** методички по ГО: «Карточка учёта СИЗ» —
+электронная карточка средства индивидуальной защиты (противогаз, аптечка,
+костюм Л-1 и т.п.) с контролем сроков годности.
+
+## Стек
+- ASP.NET Core 8 Web API (controllers)
+- Entity Framework Core + SQLite (файл `sizcards.db` создаётся автоматически)
+- Swagger UI (документация и ручное тестирование API)
+- Простой фронтенд на чистом HTML/CSS/JS в `wwwroot/` (без фреймворков)
+
+## Архитектура
+
+Слоистая архитектура с Repository + Service:
+
+```
+Controller (SizCardsController)
+      ↓ зависит от интерфейса
+Service (ISizCardService / SizCardService)   — бизнес-логика, маппинг DTO → сущность
+      ↓ зависит от интерфейса
+Repository (ISizCardRepository / SizCardRepository) — доступ к данным
+      ↓
+AppDbContext (EF Core) → SQLite
+```
+
+Контроллер ничего не знает ни про EF Core, ни про SQLite — только про
+`ISizCardService`. Сервис ничего не знает про EF Core — только про
+`ISizCardRepository`. Оба интерфейса регистрируются в `Program.cs` через
+`AddScoped`. Благодаря этому:
+- смена СУБД (SQLite → PostgreSQL/SQL Server) требует правки только внутри
+  `SizCardRepository` (или новой реализации `ISizCardRepository`) — контроллер
+  и сервис не трогаем;
+- бизнес-правила (например, запрет списания без заполненного `Conclusion`)
+  естественно ложатся в `SizCardService`, не размывая контроллер;
+- слои можно тестировать изолированно — сервис тестируется с mock-репозиторием,
+  без реальной базы данных.
+
+## Как запустить
+
+Нужен установленный **.NET 8 SDK** (`dotnet --version` должен показать 8.x).
+
+```bash
+cd SizCardApi
+dotnet restore
+dotnet run
+```
+
+Один процесс `dotnet run` поднимает сразу и API, и фронтенд (отдаются из
+`wwwroot/` через `UseStaticFiles`), поэтому CORS и отдельный сервер для
+страницы не нужны:
+
+- `http://localhost:5000/` — сама страница учёта СИЗ (таблица + форма)
+- `http://localhost:5000/swagger` — Swagger UI со всеми эндпоинтами
+
+База данных (`sizcards.db`, SQLite-файл) создаётся автоматически при первом
+запуске — ничего дополнительно накатывать не нужно.
+
+## Эндпоинты
+
+| Метод | Путь                              | Что делает                                   |
+|-------|-----------------------------------|-----------------------------------------------|
+| GET   | `/api/sizcards`                   | Список всех карточек (можно `?status=Issued`) |
+| GET   | `/api/sizcards/expiring-soon`     | Карточки с истекающим (≤6 мес.) сроком годности |
+| GET   | `/api/sizcards/{id}`              | Одна карточка по id                          |
+| POST  | `/api/sizcards`                   | Создать карточку                             |
+| PUT   | `/api/sizcards/{id}`              | Полностью обновить карточку                  |
+| PATCH | `/api/sizcards/{id}/status`       | Сменить только статус (`InStock`/`Issued`/`UnderInspection`/`WrittenOff`) |
+| DELETE| `/api/sizcards/{id}`              | Удалить карточку                             |
+
+## Пример запроса (создание карточки)
+
+```bash
+curl -X POST http://localhost:5000/api/sizcards \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Противогаз ГП-7",
+    "manufacturer": "Заречный завод",
+    "batchNumber": "П-2024/128",
+    "manufactureDate": "2020-05-10",
+    "size": "2",
+    "storageLocation": "Склад №1, стеллаж 3",
+    "inventoryNumber": "СИЗ-0001",
+    "status": "InStock",
+    "expiryDate": "2025-06-01",
+    "conclusion": "Годен"
+  }'
+```
