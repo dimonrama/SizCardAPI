@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Акты списания СИЗ</title>
+<link rel="stylesheet" href="style.css" />
+<style>
+  header a.back { color: #fff; font-size: 14px; opacity: 0.85; text-decoration: none; }
+  header a.back:hover { opacity: 1; text-decoration: underline; }
+
+  section.panel {
+    background: #fff;
+    border-radius: 8px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+    padding: 16px 20px;
+    margin-bottom: 24px;
+  }
+  section.panel h2 { margin: 0 0 12px; font-size: 17px; }
+  .hint { color: #666; font-size: 13px; margin: 0 0 12px; }
+
+  .act-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 16px; margin: 16px 0; }
+  .act-fields label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: #444; }
+  .act-fields input, .act-fields textarea { width: 100%; font-family: inherit; font-size: 14px;
+    padding: 6px 8px; border: 1px solid #ccd2dc; border-radius: 5px; }
+  .act-fields .wide { grid-column: 1 / -1; }
+
+  .reason { display: inline-block; padding: 3px 9px; border-radius: 12px; font-size: 12px; font-weight: 600; }
+  .reason-Expired { background: #fbe3e3; color: #b23030; }
+  .reason-Unfit   { background: #fdf0da; color: #a3690f; }
+
+  td.chk, th.chk { width: 36px; text-align: center; }
+
+  /* --- Печатная форма акта --- */
+  .act-sheet { background: #fff; border-radius: 10px; padding: 32px 36px; width: 100%;
+    max-width: 900px; max-height: 92vh; overflow-y: auto; box-shadow: 0 10px 30px rgba(0,0,0,.25); }
+  .act-sheet h2 { text-align: center; margin: 0 0 4px; font-size: 18px; }
+  .act-sheet .act-date { text-align: center; margin: 0 0 20px; color: #555; font-size: 14px; }
+  .act-sheet table { box-shadow: none; border-radius: 0; margin: 12px 0 20px; }
+  .act-sheet th, .act-sheet td { border: 1px solid #999; font-size: 13px; }
+  .act-sheet th { text-transform: none; letter-spacing: 0; color: #222; background: #f3f3f3; }
+  .signature { display: flex; align-items: flex-end; gap: 12px; margin: 22px 0 4px; font-size: 14px; }
+  .signature .line { flex: 1; border-bottom: 1px solid #333; min-height: 18px; }
+  .signature .cap { font-size: 12px; color: #666; }
+  .sheet-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px; }
+
+  @media (max-width: 600px) { .act-fields { grid-template-columns: 1fr; } }
+
+  @media print {
+    body { background: #fff; }
+    body > *:not(#actOverlay) { display: none !important; }
+    #actOverlay { position: static !important; background: none !important; padding: 0 !important; display: block !important; }
+    .act-sheet { box-shadow: none; max-height: none; max-width: none; padding: 0; overflow: visible; }
+    .sheet-actions { display: none !important; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Акты списания СИЗ</h1>
+  <p class="subtitle">Списание просроченных и непригодных средств индивидуальной защиты</p>
+  <p style="margin:10px 0 0"><a class="back" href="index.html">← К карточкам учёта</a></p>
+</header>
+
+<main>
+
+  <p id="errorBox" class="error hidden"></p>
+
+  <!-- 1. Что подлежит списанию + формирование акта -->
+  <section class="panel">
+    <h2>Подлежат списанию</h2>
+    <p class="hint">
+      Сюда попадают карточки, у которых срок годности уже истёк или стоит заключение «Не годен».
+      После создания акта выбранные карточки получают статус «Списано» и выводятся из резерва.
+    </p>
+
+    <table>
+      <thead>
+        <tr>
+          <th class="chk"><input type="checkbox" id="checkAll" title="Выбрать все" /></th>
+          <th>Наименование</th>
+          <th>Инв. №</th>
+          <th>Партия</th>
+          <th>Срок годности</th>
+          <th>Место хранения</th>
+          <th>Статус</th>
+          <th>Причина</th>
+        </tr>
+      </thead>
+      <tbody id="candBody">
+        <tr><td colspan="8" class="empty">Загрузка...</td></tr>
+      </tbody>
+    </table>
+
+    <div class="act-fields">
+      <label>Дата акта
+        <input type="date" id="a_date" />
+      </label>
+      <label>Председатель комиссии (ФИО)
+        <input type="text" id="a_chairman" maxlength="150" />
+      </label>
+      <label class="wide">Члены комиссии
+        <input type="text" id="a_members" maxlength="500" placeholder="ФИО через запятую" />
+      </label>
+      <label class="wide">Примечание
+        <input type="text" id="a_note" maxlength="500" />
+      </label>
+    </div>
+
+    <button id="btnCreate" class="primary">Сформировать акт списания</button>
+    <span id="selectedInfo" class="hint" style="margin-left:10px"></span>
+  </section>
+
+  <!-- 2. Список актов -->
+  <section class="panel">
+    <h2>Созданные акты</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Номер</th>
+          <th>Дата</th>
+          <th>Позиций</th>
+          <th>Председатель</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody id="actsBody">
+        <tr><td colspan="5" class="empty">Загрузка...</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+</main>
+
+<!-- Просмотр / печать акта -->
+<div id="actOverlay" class="overlay" style="display: none;">
+  <div class="act-sheet" id="actSheet"></div>
+</div>
+
+<script>
+  const API = "/api/writeoff";
+
+  const statusLabels = {
+    InStock: "На хранении",
+    Issued: "Выдано",
+    UnderInspection: "На проверке",
+    WrittenOff: "Списано",
+  };
+  const reasonLabels = {
+    Expired: "Истёк срок годности",
+    Unfit: "Признано негодным",
+  };
+
+  const errorBox = document.getElementById("errorBox");
+  const candBody = document.getElementById("candBody");
+  const actsBody = document.getElementById("actsBody");
+  const checkAll = document.getElementById("checkAll");
+  const selectedInfo = document.getElementById("selectedInfo");
+  const overlay = document.getElementById("actOverlay");
+  const sheet = document.getElementById("actSheet");
+
+  function esc(str) {
+    const div = document.createElement("div");
+    div.textContent = str ?? "";
+    return div.innerHTML;
+  }
+
+  function fmtDate(s) {
+    if (!s) return "—";
+    const [y, m, d] = s.split("-");
+    return `${d}.${m}.${y}`;
+  }
+
+  function showError(msg) { errorBox.textContent = msg; errorBox.classList.remove("hidden"); }
+  function hideError() { errorBox.classList.add("hidden"); }
+
+  async function readError(res) {
+    try {
+      const body = await res.json();
+      return body.error ?? body.title ?? JSON.stringify(body.errors ?? body);
+    } catch {
+      return `код ${res.status}`;
+    }
+  }
+
+  // --- Кандидаты на списание ---
+
+  async function loadCandidates() {
+    candBody.innerHTML = `<tr><td colspan="8" class="empty">Загрузка...</td></tr>`;
+    try {
+      const res = await fetch(`${API}/candidates`);
+      if (!res.ok) throw new Error(`Сервер ответил ${res.status}`);
+      renderCandidates(await res.json());
+    } catch (err) {
+      candBody.innerHTML = "";
+      showError(`Не удалось загрузить список: ${err.message}. Проверь, что API запущен.`);
+    }
+  }
+
+  function renderCandidates(items) {
+    checkAll.checked = items.length > 0;
+    checkAll.disabled = items.length === 0;
+    document.getElementById("btnCreate").disabled = items.length === 0;
+
+    if (!items.length) {
+      candBody.innerHTML = `<tr><td colspan="8" class="empty">Списывать нечего — просроченных и непригодных СИЗ нет</td></tr>`;
+      updateSelectedInfo();
+      return;
+    }
+
+    candBody.innerHTML = items.map(c => `
+      <tr>
+        <td class="chk"><input type="checkbox" class="cand-chk" data-id="${c.id}" checked /></td>
+        <td>${esc(c.name)}</td>
+        <td>${esc(c.inventoryNumber ?? "")}</td>
+        <td>${esc(c.batchNumber ?? "")}</td>
+        <td>${fmtDate(c.expiryDate)}</td>
+        <td>${esc(c.storageLocation ?? "")}</td>
+        <td><span class="badge badge-${c.status}">${statusLabels[c.status] ?? c.status}</span></td>
+        <td><span class="reason reason-${c.reason}">${reasonLabels[c.reason] ?? c.reason}</span></td>
+      </tr>
+    `).join("");
+    updateSelectedInfo();
+  }
+
+  function selectedIds() {
+    return [...document.querySelectorAll(".cand-chk:checked")].map(x => Number(x.dataset.id));
+  }
+
+  function updateSelectedInfo() {
+    const total = document.querySelectorAll(".cand-chk").length;
+    selectedInfo.textContent = total ? `Выбрано: ${selectedIds().length} из ${total}` : "";
+  }
+
+  checkAll.addEventListener("change", () => {
+    document.querySelectorAll(".cand-chk").forEach(x => (x.checked = checkAll.checked));
+    updateSelectedInfo();
+  });
+
+  candBody.addEventListener("change", (e) => {
+    if (!e.target.classList.contains("cand-chk")) return;
+    const boxes = [...document.querySelectorAll(".cand-chk")];
+    checkAll.checked = boxes.every(x => x.checked);
+    updateSelectedInfo();
+  });
+
+  // --- Создание акта ---
+
+  document.getElementById("btnCreate").addEventListener("click", async () => {
+    hideError();
+    const ids = selectedIds();
+    if (!ids.length) {
+      showError("Отметь хотя бы одну карточку для списания.");
+      return;
+    }
+    if (!confirm(`Сформировать акт и списать ${ids.length} шт.? Карточки получат статус «Списано».`)) return;
+
+    const payload = {
+      actDate: document.getElementById("a_date").value || null,
+      chairmanName: document.getElementById("a_chairman").value || null,
+      commissionMembers: document.getElementById("a_members").value || null,
+      note: document.getElementById("a_note").value || null,
+      cardIds: ids,
+    };
+
+    try {
+      const res = await fetch(`${API}/acts`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) throw new Error(await readError(res));
+
+      const act = await res.json();
+      await Promise.all([loadCandidates(), loadActs()]);
+      showAct(act);
+    } catch (err) {
+      showError(`Не удалось создать акт: ${err.message}`);
+      loadCandidates();
+    }
+  });
+
+  // --- Список актов ---
+
+  async function loadActs() {
+    actsBody.innerHTML = `<tr><td colspan="5" class="empty">Загрузка...</td></tr>`;
+    try {
+      const res = await fetch(`${API}/acts`);
+      if (!res.ok) throw new Error(`Сервер ответил ${res.status}`);
+      const acts = await res.json();
+
+      if (!acts.length) {
+        actsBody.innerHTML = `<tr><td colspan="5" class="empty">Актов пока нет</td></tr>`;
+        return;
+      }
+      actsBody.innerHTML = acts.map(a => `
+        <tr>
+          <td>${esc(a.actNumber)}</td>
+          <td>${fmtDate(a.actDate)}</td>
+          <td>${a.items.length}</td>
+          <td>${esc(a.chairmanName ?? "")}</td>
+          <td class="actions"><button data-open="${a.id}">Открыть / печать</button></td>
+        </tr>
+      `).join("");
+    } catch (err) {
+      actsBody.innerHTML = "";
+      showError(`Не удалось загрузить акты: ${err.message}`);
+    }
+  }
+
+  actsBody.addEventListener("click", async (e) => {
+    const id = e.target.dataset.open;
+    if (!id) return;
+    const res = await fetch(`${API}/acts/${id}`);
+    if (res.ok) showAct(await res.json());
+    else showError(`Не удалось открыть акт (код ${res.status})`);
+  });
+
+  // --- Просмотр и печать акта ---
+
+  function showAct(act) {
+    const rows = act.items.map((it, i) => `
+      <tr>
+        <td>${i + 1}</td>
+        <td>${esc(it.name)}</td>
+        <td>${esc(it.inventoryNumber ?? "")}</td>
+        <td>${esc(it.batchNumber ?? "")}</td>
+        <td>${esc(it.serialNumber ?? "")}</td>
+        <td>${esc(it.size ?? "")}</td>
+        <td>${fmtDate(it.expiryDate)}</td>
+        <td>${reasonLabels[it.reason] ?? it.reason}</td>
+      </tr>
+    `).join("");
+
+    sheet.innerHTML = `
+      <h2>АКТ № ${esc(act.actNumber)}</h2>
+      <p class="act-date">о списании средств индивидуальной защиты от ${fmtDate(act.actDate)}</p>
+
+      <p>Комиссия в составе:</p>
+      <p>Председатель: <b>${esc(act.chairmanName ?? "____________________")}</b></p>
+      <p>Члены комиссии: <b>${esc(act.commissionMembers ?? "____________________")}</b></p>
+      <p>провела осмотр СИЗ и установила, что следующие изделия не подлежат дальнейшему хранению
+         и использованию и подлежат списанию:</p>
+
+      <table>
+        <thead>
+          <tr>
+            <th>№</th><th>Наименование</th><th>Инв. №</th><th>Партия</th>
+            <th>Зав. №</th><th>Размер</th><th>Срок годности</th><th>Причина списания</th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>
+
+      <p>Всего к списанию: <b>${act.items.length}</b> поз.</p>
+      ${act.note ? `<p>Примечание: ${esc(act.note)}</p>` : ""}
+
+      <div class="signature"><span>Председатель комиссии:</span><span class="line"></span><span class="cap">(подпись / ФИО)</span></div>
+      <div class="signature"><span>Члены комиссии:</span><span class="line"></span><span class="cap">(подпись / ФИО)</span></div>
+      <div class="signature"><span></span><span class="line"></span><span class="cap">(подпись / ФИО)</span></div>
+
+      <div class="sheet-actions">
+        <button id="btnCloseAct">Закрыть</button>
+        <button id="btnPrintAct" class="primary">Печать</button>
+      </div>
+    `;
+    overlay.style.display = "flex";
+    document.getElementById("btnCloseAct").addEventListener("click", () => (overlay.style.display = "none"));
+    document.getElementById("btnPrintAct").addEventListener("click", () => window.print());
+  }
+
+  // Дата акта по умолчанию — сегодня (локальная).
+  document.getElementById("a_date").value = new Date().toLocaleDateString("sv-SE");
+
+  loadCandidates();
+  loadActs();
+</script>
+
+</body>
+</html>

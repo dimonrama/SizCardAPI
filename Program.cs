@@ -8,7 +8,7 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddControllers()
     .AddJsonOptions(options =>
     {
-     
+
         options.JsonSerializerOptions.Converters.Add(
             new System.Text.Json.Serialization.JsonStringEnumConverter());
     });
@@ -20,7 +20,7 @@ builder.Services.AddSwaggerGen(c =>
     {
         Title = "СИЗ — Карточка учёта API",
         Version = "v1",
-        Description = "CRUD API для электронной карточки учёта СИЗ (Пункт №2 методички ГО)."
+        Description = "CRUD API для электронной карточки учёта СИЗ (Пункт №2 методички ГО) и акты списания СИЗ."
     });
 });
 
@@ -31,6 +31,10 @@ builder.Services.AddDbContext<AppDbContext>(options =>
 
 builder.Services.AddScoped<ISizCardRepository, SizCardRepository>();
 builder.Services.AddScoped<ISizCardService, SizCardService>();
+
+// Акты списания СИЗ
+builder.Services.AddScoped<IWriteOffRepository, WriteOffRepository>();
+builder.Services.AddScoped<IWriteOffService, WriteOffService>();
 
 builder.Services.AddCors(options =>
 {
@@ -45,13 +49,16 @@ using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
     db.Database.EnsureCreated();
+
+    // EnsureCreated не добавляет таблицы в уже существующую базу — доводим схему актов списания.
+    DbInitializer.EnsureWriteOffTables(db);
 }
 
 app.UseSwagger();
 app.UseSwaggerUI(c =>
 {
     c.SwaggerEndpoint("/swagger/v1/swagger.json", "СИЗ API v1");
-    c.RoutePrefix = "swagger"; 
+    c.RoutePrefix = "swagger";
 });
 
 

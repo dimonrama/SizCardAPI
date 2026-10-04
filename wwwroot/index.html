@@ -11,6 +11,7 @@
 <header>
   <h1>Учёт СИЗ</h1>
   <p class="subtitle">Электронная карточка учёта средств индивидуальной защиты</p>
+  <p style="margin:10px 0 0"><a href="writeoff.html" style="color:#fff;font-size:14px">Акты списания →</a></p>
 </header>
 
 <main>
@@ -109,6 +110,14 @@
       </label>
       <label>Дата выдачи
         <input type="date" id="f_issueDate" />
+      </label>
+      <label>Заключение о годности
+        <select id="f_conclusion">
+          <option value="">—</option>
+          <option value="Годен">Годен</option>
+          <option value="Требует освежения">Требует освежения</option>
+          <option value="Не годен">Не годен</option>
+        </select>
       </label>
     </div>
 
@@ -227,6 +236,7 @@
     document.getElementById("f_expiryDate").value = card?.expiryDate ?? "";
     document.getElementById("f_owner").value = card?.owner ?? "";
     document.getElementById("f_issueDate").value = card?.issueDate ?? "";
+    document.getElementById("f_conclusion").value = card?.conclusion ?? "";
     overlay.style.display = "flex";
   }
 
@@ -275,6 +285,7 @@
       expiryDate: document.getElementById("f_expiryDate").value || null,
       owner: document.getElementById("f_owner").value || null,
       issueDate: document.getElementById("f_issueDate").value || null,
+      conclusion: document.getElementById("f_conclusion").value || null,
     };
 
     try {
